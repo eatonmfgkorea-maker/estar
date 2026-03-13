@@ -519,12 +519,14 @@ textarea.form-input {
 /* SEARCH BAR */
 .search-bar {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
 .search-input {
   flex: 1;
+  min-width: 0;
   padding: 9px 12px;
   border: 1.5px solid var(--border);
   border-radius: 8px;
@@ -547,13 +549,14 @@ textarea.form-input {
   background: none;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 0 12px;
+  padding: 0 10px;
   font-size: 12px;
   font-family: 'Noto Sans KR', sans-serif;
   color: var(--text-sub);
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .search-clear:hover { background: #F0F2F5; color: var(--text); }
@@ -744,8 +747,8 @@ textarea.form-input {
       </div>
     </div>
     <div class="search-bar">
-      <input type="text" class="search-input" id="searchSender" placeholder="🔍 보낸사람 검색" oninput="filterList()">
-      <input type="text" class="search-input" id="searchReceiver" placeholder="🔍 받은사람 검색" oninput="filterList()">
+      <input type="text" class="search-input" id="searchSender" placeholder="보낸사람" oninput="filterList()">
+      <input type="text" class="search-input" id="searchReceiver" placeholder="받은사람" oninput="filterList()">
       <button class="search-clear" onclick="clearSearch()">초기화</button>
     </div>
     <div id="listContainer">
