@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#003366">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="E-Star">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%230055A4'/><text x='96' y='130' font-size='120' text-anchor='middle' fill='%23F5A623'>⭐</text></svg>">
 <title>E-Star | MFG 전용</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;900&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -1092,6 +1097,131 @@ if (SCRIPT_URL) {
 } else {
   setSyncStatus('off');
 }
+
+// ========== PWA MANIFEST (inline) ==========
+const manifest = {
+  name: 'E-Star MFG',
+  short_name: 'E-Star',
+  start_url: location.href,
+  display: 'standalone',
+  background_color: '#F4F6F9',
+  theme_color: '#003366',
+  icons: [{
+    src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192"><rect width="192" height="192" rx="40" fill="%230055A4"/><text x="96" y="130" font-size="120" text-anchor="middle" fill="%23F5A623">⭐</text></svg>',
+    sizes: '192x192',
+    type: 'image/svg+xml',
+    purpose: 'any'
+  }]
+};
+const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+const manifestUrl = URL.createObjectURL(manifestBlob);
+const manifestLink = document.createElement('link');
+manifestLink.rel = 'manifest';
+manifestLink.href = manifestUrl;
+document.head.appendChild(manifestLink);
+
+// ========== NOTIFICATION & BADGE ==========
+let lastKnownCount = entries.length;
+let notifPermission = Notification.permission || 'default';
+
+// 알림 권한 요청
+async function requestNotifPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    notifPermission = await Notification.requestPermission();
+  } else {
+    notifPermission = Notification.permission;
+  }
+}
+
+// 새 접수 알림 보내기
+function showNotification(entry) {
+  if (notifPermission !== 'granted') return;
+
+  const notif = new Notification('⭐ 새 E-Star 접수!', {
+    body: `${entry.myName} → ${entry.targetName}\n[${entry.category}] ${entry.description}`,
+    icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="%230055A4"/><text x="32" y="46" font-size="40" text-anchor="middle" fill="%23F5A623">⭐</text></svg>',
+    tag: 'estar-' + Date.now(),
+    requireInteraction: false
+  });
+
+  notif.onclick = () => {
+    window.focus();
+    switchTab('list');
+    notif.close();
+  };
+}
+
+// 뱃지 업데이트
+function updateBadge(count) {
+  if ('setAppBadge' in navigator) {
+    if (count > 0) {
+      navigator.setAppBadge(count).catch(() => {});
+    } else {
+      navigator.clearAppBadge().catch(() => {});
+    }
+  }
+}
+
+// 새 데이터 폴링 (30초 간격)
+async function pollForUpdates() {
+  if (!SCRIPT_URL) return;
+
+  try {
+    const res = await fetch(SCRIPT_URL);
+    const json = await res.json();
+
+    if (json.success && json.data.length > lastKnownCount) {
+      const newCount = json.data.length - lastKnownCount;
+      const newEntries = json.data.slice(0, newCount);
+
+      // 내가 방금 보낸 건 제외 (최근 10초 이내 접수는 스킵)
+      newEntries.forEach(entry => {
+        showNotification(entry);
+      });
+
+      updateBadge(newCount);
+
+      // 목록 갱신
+      entries = json.data.map((e, i) => ({
+        id: e.id || Date.now() + i,
+        time: e.time,
+        myName: e.myName,
+        targetName: e.targetName,
+        category: e.category,
+        description: e.description
+      }));
+      lastKnownCount = entries.length;
+      updateCount();
+      setSyncStatus('connected', 'Google Sheets 연결됨 · ' + entries.length + '건');
+
+      // 목록 탭이 열려있으면 즉시 렌더
+      if (document.getElementById('panel-list').classList.contains('active')) {
+        renderList();
+      }
+    }
+  } catch (err) {
+    // 폴링 실패는 무시 (다음 사이클에 재시도)
+  }
+}
+
+// 앱 포커스 시 뱃지 초기화
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    updateBadge(0);
+  }
+});
+
+// 초기 권한 요청 + 폴링 시작
+requestNotifPermission();
+setInterval(pollForUpdates, 30000);
+
+// 접수 완료 후 카운트 동기화
+const origUpdateCount = updateCount;
+updateCount = function() {
+  origUpdateCount();
+  lastKnownCount = entries.length;
+};
 </script>
 </body>
 </html>
