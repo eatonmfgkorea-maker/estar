@@ -753,7 +753,7 @@ textarea.form-input {
 
 </div>
 
-<div class="watermark">EATON MFG Pyungtaek · E-Star Recognition System</div>
+<div class="watermark">EATON MFG Pyungtaek · E-Star Recognition System · v001S</div>
 
 <!-- TOAST -->
 <div class="toast" id="toast">✅ 접수 완료!</div>
@@ -762,8 +762,27 @@ textarea.form-input {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 let entries = [];
-const DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbziIornSxV3N2IXw9qY1bJDPs1nQNa4LpyvpF7y4QcoTPm2aZNZfFlzESYKC0poz2kH/exec';
-let SCRIPT_URL = DEFAULT_SCRIPT_URL;
+// 서버 (주소 고정 · 공개용 키) — 로그인 없이 접수·조회만 가능
+const SB_URL = 'https://tmbeaswlpvsyjehacgsa.supabase.co';
+const SB_KEY = 'sb_publishable_OM6ITpYn8LYPWXXhwdA4kQ_HuAyAxV9';
+const SB_TABLE = SB_URL + '/rest/v1/estar_entries';
+const SB_HEAD = { apikey: SB_KEY };
+let SCRIPT_URL = SB_URL;
+
+// 서버에서 전체 목록 (최신순) → 화면용 형태
+async function sbFetchEntries() {
+  const res = await fetch(SB_TABLE + '?select=id,time,my_name,target_name,category,description&order=created_at.desc,id.desc', { headers: SB_HEAD, cache: 'no-store' });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const rows = await res.json();
+  return rows.map(r => ({ id: r.id, time: r.time, myName: r.my_name, targetName: r.target_name, category: r.category, description: r.description }));
+}
+// 서버 건수만 (가벼운 확인용)
+async function sbCount() {
+  const res = await fetch(SB_TABLE + '?select=id', { method: 'HEAD', headers: { ...SB_HEAD, Prefer: 'count=exact' }, cache: 'no-store' });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const cr = res.headers.get('content-range') || '';
+  return parseInt(cr.split('/')[1], 10) || 0;
+}
 
 // ========== SYNC STATUS ==========
 function setSyncStatus(state, msg) {
@@ -773,7 +792,7 @@ function setSyncStatus(state, msg) {
 
   if (state === 'connected') {
     dot.classList.add('connected');
-    text.textContent = msg || 'Google Sheets 연결됨';
+    text.textContent = msg || '서버 연결됨';
   } else if (state === 'loading') {
     dot.classList.add('loading');
     text.textContent = msg || '동기화 중...';
@@ -795,24 +814,10 @@ async function refreshData() {
   setSyncStatus('loading', '데이터 불러오는 중...');
 
   try {
-    const res = await fetch(SCRIPT_URL);
-    const json = await res.json();
-
-    if (json.success) {
-      entries = json.data.map((e, i) => ({
-        id: e.id || Date.now() + i,
-        time: e.time,
-        myName: e.myName,
-        targetName: e.targetName,
-        category: e.category,
-        description: e.description
-      }));
-      updateCount();
-      renderList();
-      setSyncStatus('connected', 'Google Sheets 연결됨 · ' + entries.length + '건');
-    } else {
-      throw new Error(json.error || '데이터 로드 실패');
-    }
+    entries = await sbFetchEntries();
+    updateCount();
+    renderList();
+    setSyncStatus('connected', '서버 연결됨 · ' + entries.length + '건');
   } catch (err) {
     console.error(err);
     setSyncStatus('error', '연결 오류: ' + err.message);
@@ -824,12 +829,13 @@ async function postToSheet(data) {
   if (!SCRIPT_URL) return false;
 
   try {
-    const res = await fetch(SCRIPT_URL, {
+    const res = await fetch(SB_TABLE, {
       method: 'POST',
-      body: JSON.stringify(data)
+      headers: { ...SB_HEAD, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ time: data.time, my_name: data.myName, target_name: data.targetName, category: data.category, description: data.description })
     });
-    const json = await res.json();
-    return json.success;
+    if (!res.ok) console.error('저장 실패', res.status, await res.text());
+    return res.ok;
   } catch (err) {
     console.error(err);
     return false;
@@ -937,10 +943,10 @@ async function submitForm() {
   btn.disabled = true;
   btn.innerHTML = '<div class="spinner"></div> 저장 중...';
 
-  // Google Sheets에 저장
+  // 서버에 저장
   let sheetOk = false;
   if (SCRIPT_URL) {
-    setSyncStatus('loading', '시트에 저장 중...');
+    setSyncStatus('loading', '저장 중...');
     sheetOk = await postToSheet(entry);
   }
 
@@ -953,10 +959,11 @@ async function submitForm() {
   btn.innerHTML = btnText;
 
   if (SCRIPT_URL && sheetOk) {
-    setSyncStatus('connected', 'Google Sheets 연결됨 · ' + entries.length + '건');
+    refreshData();
+    setSyncStatus('connected', '서버 연결됨 · ' + entries.length + '건');
     showToast('toast');
   } else if (SCRIPT_URL && !sheetOk) {
-    setSyncStatus('error', '시트 저장 실패 (로컬에만 저장됨)');
+    setSyncStatus('error', '저장 실패 — 이 화면에만 보입니다. 다시 접수해 주세요');
     showToast('toast');
   } else {
     showToast('toast');
@@ -1152,15 +1159,15 @@ function updateBadge(count) {
 
 // 새 데이터 폴링 (30초 간격)
 async function pollForUpdates() {
-  if (!SCRIPT_URL) return;
+  if (!SCRIPT_URL || document.hidden) return;
 
   try {
-    const res = await fetch(SCRIPT_URL);
-    const json = await res.json();
-
-    if (json.success && json.data.length > lastKnownCount) {
-      const newCount = json.data.length - lastKnownCount;
-      const newEntries = json.data.slice(0, newCount);
+    // 건수만 먼저 확인하고, 늘었을 때만 목록을 받음
+    const total = await sbCount();
+    if (total > lastKnownCount) {
+      const fresh = await sbFetchEntries();
+      const newCount = fresh.length - lastKnownCount;
+      const newEntries = fresh.slice(0, newCount);
 
       // 내가 방금 보낸 건 제외 (최근 10초 이내 접수는 스킵)
       newEntries.forEach(entry => {
@@ -1170,17 +1177,10 @@ async function pollForUpdates() {
       updateBadge(newCount);
 
       // 목록 갱신
-      entries = json.data.map((e, i) => ({
-        id: e.id || Date.now() + i,
-        time: e.time,
-        myName: e.myName,
-        targetName: e.targetName,
-        category: e.category,
-        description: e.description
-      }));
+      entries = fresh;
       lastKnownCount = entries.length;
       updateCount();
-      setSyncStatus('connected', 'Google Sheets 연결됨 · ' + entries.length + '건');
+      setSyncStatus('connected', '서버 연결됨 · ' + entries.length + '건');
 
       // 목록 탭이 열려있으면 즉시 렌더
       if (document.getElementById('panel-list').classList.contains('active')) {
